@@ -1,0 +1,50 @@
+---
+- name: Deploy Java application
+  hosts: localhost
+  become: yes
+  tasks:
+    - name: Ensure boto3 and botocore are installed
+      pip:
+        name:
+          - boto3
+          - botocore
+        executable: /Users/saeed_farkhondeh/.venvs/ansible-env/bin/pip
+
+    - name: Create directory for the application
+      file:
+        path: /opt/java-app
+        state: directory
+
+    - name: Download the latest artifact from S3
+      aws_s3:
+        bucket: jenkins-artifacts-local-dev
+        object: Local-Development/9/artifacts/target/java-functional-1.0-SNAPSHOT.jar
+        dest: /opt/java-app/java-functional.jar
+        mode: get
+        overwrite: always
+      environment:
+        AWS_ACCESS_KEY_ID: "{{ lookup('env', 'AWS_ACCESS_KEY_ID') }}"
+        AWS_SECRET_ACCESS_KEY: "{{ lookup('env', 'AWS_SECRET_ACCESS_KEY') }}"
+      register: download_result
+
+    - name: Handle download result
+      fail:
+        msg: "Failed to download artifact from S3"
+      when: download_result.failed
+
+    - name: Create a shell script to run the Java application
+      copy:
+        content: |
+          #!/bin/bash
+          /Users/saeed_farkhondeh/.venvs/ansible-env/bin/python -m boto3
+          java -jar /opt/java-app/java-functional.jar
+        dest: /opt/java-app/run-java-app.sh
+        mode: '0755'
+      when: download_result.changed  # Only add this task if the download was successful
+
+    - name: Create cron job to run the Java application every 3 minutes
+      cron:
+        name: "Run Java application every 3 minutes"
+        minute: "*/3"
+        job: "/opt/java-app/run-java-app.sh > /var/log/java-app.log 2>&1"
+      when: download_result.changed  # Only add this task if the download was successful
